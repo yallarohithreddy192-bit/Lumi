@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // User Profiles
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.userId == request.auth.uid &&
+               data.email is string && data.email.size() <= 256;
+      }
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']) &&
+                    incoming().updatedAt == request.time;
+    }
+
+    // Chat Sessions
+    match /chat_sessions/{sessionId} {
+      function isValidSession(data) {
+        return data.userId == request.auth.uid &&
+               data.title is string && data.title.size() <= 500;
+      }
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidSession(incoming()) && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && existing().userId == request.auth.uid && isValidSession(incoming()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['title', 'lastMessageAt']) &&
+                    incoming().lastMessageAt == request.time;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+
+      // Messages (Subcollection)
+      match /messages/{messageId} {
+        function isValidMessage(data) {
+          return data.sessionId == sessionId &&
+                 data.role in ['user', 'model'] &&
+                 data.content is string && data.content.size() <= 50000 &&
+                 (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 2000000));
+        }
+        function userOwnsSession() {
+          return get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data.userId == request.auth.uid;
+        }
+        allow list: if isSignedIn() && userOwnsSession();
+        allow get: if isSignedIn() && userOwnsSession();
+        allow create: if isSignedIn() && userOwnsSession() && isValidMessage(incoming()) && incoming().createdAt == request.time;
+        allow update: if isSignedIn() && userOwnsSession() && isValidMessage(incoming()) &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['content']);
+      }
+    }
+  }
+}

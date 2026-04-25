@@ -1,0 +1,6 @@
+{
+  "name": "VoxAI - Voice & Chat Assistant",
+  "description": "A full-stack AI companion featuring real-time chat, voice synthesis (TTS), and speech recognition (STT) powered by Gemini.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["AI Chat", "Voice Interaction", "Cloud Sync"]
+}
